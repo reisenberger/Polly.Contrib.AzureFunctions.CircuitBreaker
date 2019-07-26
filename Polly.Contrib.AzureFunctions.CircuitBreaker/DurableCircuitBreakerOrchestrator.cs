@@ -13,7 +13,7 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker
     public class DurableCircuitBreakerOrchestrator : IDurableCircuitBreakerOrchestrator
     {
         private const string DefaultFidelityPriorityCheckCircuitTimeout = "PT2S";
-        private const string DefaultFidelityPriorityCheckCircuitRetryInterval = "PT0.02S";
+        private const string DefaultFidelityPriorityCheckCircuitRetryInterval = "PT0.25S";
 
         private const string DurableCircuitBreakerKeyPrefix = nameof(DurableCircuitBreakerOrchestrator) + "-";
         private const string DefaultThroughputPriorityCheckCircuitInterval = "PT5S";
@@ -44,52 +44,46 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker
                 throw new ArgumentException($"Total timeout {checkCircuitConfiguration.timeout.TotalSeconds} should be bigger than retry timeout {checkCircuitConfiguration.retryInterval.TotalSeconds}");
             }
 
-            using (new TimingLogger("FidelityPriority:IsExecutionPermitted_WithinOrchestrationFunction", log))
+            string executionPermittedInstanceId = await orchestrationClient.StartNewAsync(IsExecutionPermittedInternalOrchestratorName, circuitBreakerId);
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            while (true)
             {
-                string executionPermittedInstanceId = await orchestrationClient.StartNewAsync(IsExecutionPermittedInternalOrchestratorName, circuitBreakerId);
-
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                while (true)
+                DurableOrchestrationStatus status = await orchestrationClient.GetStatusAsync(executionPermittedInstanceId);
+                if (status != null)
                 {
-                    DurableOrchestrationStatus status =
-                        await orchestrationClient.GetStatusAsync(executionPermittedInstanceId);
-                    if (status != null)
+                    if (status.RuntimeStatus == OrchestrationRuntimeStatus.Completed)
                     {
-                        if (status.RuntimeStatus == OrchestrationRuntimeStatus.Completed)
+                        try
                         {
-                            try
-                            {
-                                bool isExecutionPermitted = status.Output.ToObject<bool>();
-                                log.LogCircuitBreakerMessage(circuitBreakerId, $"IsExecutionPermitted (fidelity priority) for circuit-breaker = '{circuitBreakerId}' returned: {isExecutionPermitted}.");
-                                return isExecutionPermitted;
-                            }
-                            catch
-                            {
-                                return LogAndReturnForFailure("Faulted", circuitBreakerId, log);
-                            }
+                            bool isExecutionPermitted = status.Output.ToObject<bool>();
+                            log.LogCircuitBreakerMessage(circuitBreakerId, $"IsExecutionPermitted (fidelity priority) for circuit-breaker = '{circuitBreakerId}' returned: {isExecutionPermitted}.");
+                            return isExecutionPermitted;
                         }
-
-                        if (status.RuntimeStatus == OrchestrationRuntimeStatus.Canceled ||
-                            status.RuntimeStatus == OrchestrationRuntimeStatus.Failed ||
-                            status.RuntimeStatus == OrchestrationRuntimeStatus.Terminated)
+                        catch
                         {
-                            return LogAndReturnForFailure(status.RuntimeStatus.ToString(), circuitBreakerId, log);
+                            return LogAndReturnForFailure("Faulted", circuitBreakerId, log);
                         }
                     }
 
-                    TimeSpan elapsed = stopwatch.Elapsed;
-                    if (elapsed < checkCircuitConfiguration.timeout)
+                    if (status.RuntimeStatus == OrchestrationRuntimeStatus.Canceled ||
+                        status.RuntimeStatus == OrchestrationRuntimeStatus.Failed ||
+                        status.RuntimeStatus == OrchestrationRuntimeStatus.Terminated)
                     {
-                        TimeSpan remainingTime = checkCircuitConfiguration.timeout.Subtract(elapsed);
-                        await Task.Delay(remainingTime > checkCircuitConfiguration.retryInterval
-                            ? checkCircuitConfiguration.retryInterval
-                            : remainingTime);
+                        return LogAndReturnForFailure(status.RuntimeStatus.ToString(), circuitBreakerId, log);
                     }
-                    else
-                    {
-                        // Timed out.
-                        return LogAndReturnForFailure("TimedOut", circuitBreakerId, log);
-                    }
+                }
+
+                TimeSpan elapsed = stopwatch.Elapsed;
+                if (elapsed < checkCircuitConfiguration.timeout)
+                {
+                    TimeSpan remainingTime = checkCircuitConfiguration.timeout.Subtract(elapsed);
+                    await Task.Delay(remainingTime > checkCircuitConfiguration.retryInterval ? checkCircuitConfiguration.retryInterval : remainingTime);
+                }
+                else
+                {
+                    // Timed out.
+                    return LogAndReturnForFailure("TimedOut", circuitBreakerId, log);
                 }
             }
         }
