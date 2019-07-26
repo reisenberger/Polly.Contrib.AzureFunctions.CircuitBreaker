@@ -44,12 +44,20 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker
                 throw new ArgumentException($"Total timeout {checkCircuitConfiguration.timeout.TotalSeconds} should be bigger than retry timeout {checkCircuitConfiguration.retryInterval.TotalSeconds}");
             }
 
-            string executionPermittedInstanceId = await orchestrationClient.StartNewAsync(IsExecutionPermittedInternalOrchestratorName, circuitBreakerId);
+            string executionPermittedInstanceId;
+            using (new TimingLogger("FidelityPriority:IsExecutionPermitted_StartingOrchestrator", log))
+            {
+                executionPermittedInstanceId = await orchestrationClient.StartNewAsync(IsExecutionPermittedInternalOrchestratorName, circuitBreakerId).ConfigureAwait(false);
+            }
 
             Stopwatch stopwatch = Stopwatch.StartNew();
             while (true)
             {
-                DurableOrchestrationStatus status = await orchestrationClient.GetStatusAsync(executionPermittedInstanceId);
+                DurableOrchestrationStatus status;
+                using (new TimingLogger("FidelityPriority:IsExecutionPermitted_GettingOrchestratorStatus", log))
+                {
+                    status = await orchestrationClient.GetStatusAsync(executionPermittedInstanceId).ConfigureAwait(false);
+                }
                 if (status != null)
                 {
                     if (status.RuntimeStatus == OrchestrationRuntimeStatus.Completed)
