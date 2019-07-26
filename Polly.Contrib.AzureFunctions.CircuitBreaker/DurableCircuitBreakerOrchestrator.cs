@@ -137,7 +137,7 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker
         private const string IsExecutionPermittedInternalOrchestratorName = "IsExecutionPermittedInternalOrchestratorName";
 
         [FunctionName(IsExecutionPermittedInternalOrchestratorName)]
-        public async Task<bool> IsExecutionPermittedInternalOrchestrator([OrchestrationTrigger] IDurableOrchestrationContext context)
+        public async Task<bool> IsExecutionPermittedInternalOrchestrator([OrchestrationTrigger] IDurableOrchestrationContext context, ILogger log)
         {
             string breakerId = context.GetInput<string>();
             if (string.IsNullOrEmpty(breakerId))
@@ -145,7 +145,12 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker
                 throw new InvalidOperationException($"{IsExecutionPermittedInternalOrchestratorName}: Could not determine breakerId of circuit-breaker requested.");
             }
 
-            return await context.CallEntityAsync<bool>(DurableCircuitBreakerEntity.GetEntityId(breakerId), DurableCircuitBreakerEntity.Operation.IsExecutionPermitted);
+            bool result;
+            using (new TimingLogger("FidelityPriority:IsExecutionPermitted_WithinOrchestrationFunctionEntityCall", log))
+            {
+                result = await context.CallEntityAsync<bool>(DurableCircuitBreakerEntity.GetEntityId(breakerId), DurableCircuitBreakerEntity.Operation.IsExecutionPermitted);
+            }
+            return result;
         }
 
         private (TimeSpan timeout, TimeSpan retryInterval) GetCheckCircuitConfiguration(string circuitBreakerId)
