@@ -39,7 +39,13 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker.Examples
             // The trade-off is that a true half-open state (permitting only one execution per breakDuration) cannot be maintained.
             // In half-open state, any number of executions may be permitted until one succeeds or fails.
 
-            if (!await durableCircuitBreakerOrchestrator.IsExecutionPermittedByBreaker_ThroughputPriority(orchestrationClient, CircuitBreakerId, log))
+            bool isExecutionPermitted;
+            using (new TimingLogger("ThroughputPriority:IsExecutionPermitted", log))
+            {
+                isExecutionPermitted = await durableCircuitBreakerOrchestrator.IsExecutionPermittedByBreaker_ThroughputPriority(orchestrationClient, CircuitBreakerId, log);
+            }
+
+            if (!isExecutionPermitted)
             {
                 log.LogError($"{nameof(FooFragileFunctionConsumingBreaker_ThroughputPriority)}: Service unavailable.");
 
@@ -50,13 +56,19 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker.Examples
             {
                 var result = await OriginalFunctionMethod(req, log);
 
-                await durableCircuitBreakerOrchestrator.RecordSuccessForBreaker(orchestrationClient, CircuitBreakerId, log);
+                using (new TimingLogger("ThroughputPriority:RecordSuccess", log))
+                {
+                    await durableCircuitBreakerOrchestrator.RecordSuccessForBreaker(orchestrationClient, CircuitBreakerId, log);
+                }
 
                 return result;
             }
             catch (Exception exception)
             {
-                await durableCircuitBreakerOrchestrator.RecordFailureForBreaker(orchestrationClient, CircuitBreakerId, log);
+                using (new TimingLogger("ThroughputPriority:RecordFailure", log))
+                {
+                    await durableCircuitBreakerOrchestrator.RecordFailureForBreaker(orchestrationClient, CircuitBreakerId, log);
+                }
 
                 log.LogError(exception, $"{nameof(FooFragileFunctionConsumingBreaker_ThroughputPriority)}: Exception: {exception.Message}");
 

@@ -36,8 +36,13 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker.Examples
             // In the _FidelityPriority example, we await hearing from the circuit-breaker whether execution is permitted.
             // This makes operations entirely faithful to the state of the breaker at any time,
             // and allows us to restrict executions in the half-open state to a limited number of trial executions.
+            bool isExecutionPermitted;
+            using (new TimingLogger("FidelityPriority:IsExecutionPermitted", log))
+            {
+                isExecutionPermitted = await durableCircuitBreakerOrchestrator.IsExecutionPermittedByBreaker_FidelityPriority(orchestrationClient, CircuitBreakerId, log);
+            }
 
-            if (!await durableCircuitBreakerOrchestrator.IsExecutionPermittedByBreaker_FidelityPriority(orchestrationClient, CircuitBreakerId, log))
+            if (!isExecutionPermitted)
             {
                 log.LogError($"{nameof(FooFragileFunctionConsumingBreaker_FidelityPriority)}: Service unavailable.");
 
@@ -48,13 +53,19 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker.Examples
             {
                 var result = await OriginalFunctionMethod(req, log);
 
-                await durableCircuitBreakerOrchestrator.RecordSuccessForBreaker(orchestrationClient, CircuitBreakerId, log);
+                using (new TimingLogger("FidelityPriority:RecordSuccess", log))
+                {
+                    await durableCircuitBreakerOrchestrator.RecordSuccessForBreaker(orchestrationClient, CircuitBreakerId, log);
+                }
 
                 return result;
             }
             catch (Exception exception)
             {
-                await durableCircuitBreakerOrchestrator.RecordFailureForBreaker(orchestrationClient, CircuitBreakerId, log);
+                using (new TimingLogger("FidelityPriority:RecordFailure", log))
+                {
+                    await durableCircuitBreakerOrchestrator.RecordFailureForBreaker(orchestrationClient, CircuitBreakerId, log);
+                }
 
                 log.LogError(exception, $"{nameof(FooFragileFunctionConsumingBreaker_FidelityPriority)}: Exception: {exception.Message}");
 
