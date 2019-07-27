@@ -86,19 +86,7 @@ namespace Polly.Contrib.AzureFunctions.CircuitBreaker
                 if (elapsed < checkCircuitConfiguration.timeout)
                 {
                     TimeSpan remainingTime = checkCircuitConfiguration.timeout.Subtract(elapsed);
-                    TimeSpan retryInterval = checkCircuitConfiguration.retryInterval < remainingTime ? checkCircuitConfiguration.retryInterval : remainingTime;
-/*
-                    using (new TimingLogger($"FidelityPriority:IsExecutionPermitted_WaitingFor{retryInterval.TotalMilliseconds:000}", log))
-                    {
-                        await Task.Delay(retryInterval).ConfigureAwait(false);
-                    }
-*/
-                    using (new TimingLogger($"FidelityPriority:IsExecutionPermitted_NoWaiting", log))
-                    {
-/*
-                        await Task.Delay(retryInterval).ConfigureAwait(false);
-*/
-                    }
+                    await Task.Delay(remainingTime > checkCircuitConfiguration.retryInterval ? checkCircuitConfiguration.retryInterval : remainingTime);
                 }
                 else
                 {
